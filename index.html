@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Online frequency analysis tool for decrypting substitution ciphers. Compare letter frequencies in encrypted text with standard language frequencies (English/Russian) and decode messages interactively.">
+<meta name="keywords" content="frequency analysis, cryptography, substitution cipher, decryption, letter frequency, cipher decoder, cryptanalysis">
+<meta name="author" content="Frequency Analysis Tool">
+<meta name="robots" content="index, follow">
+<meta property="og:title" content="Frequency Analysis - Cipher Decryption Tool">
+<meta property="og:description" content="Decrypt substitution ciphers using frequency analysis. Compare encrypted text frequencies with standard English or Russian letter frequencies.">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="ru_RU">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Frequency Analysis - Cipher Decryption Tool">
+<meta name="twitter:description" content="Decrypt substitution ciphers using frequency analysis with interactive letter replacement.">
+<title>Frequency Analysis - Cipher Decryption Tool | English & Russian</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: monospace; margin: 16px; background: #fafafa; color: #222; }
+  .crypto { max-width: 1100px; margin: 0 auto; }
+  .crypto__title { font-size: 20px; margin: 0 0 12px; }
+  .crypto__section { margin-bottom: 16px; padding: 10px; border: 1px solid #ccc; background: #fff; }
+  .crypto__section-title { font-weight: bold; margin: 0 0 8px; font-size: 14px; }
+  .crypto__input { width: 100%; min-height: 80px; font-family: monospace; font-size: 14px; padding: 6px; }
+  .crypto__row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .crypto__col { flex: 1; min-width: 280px; }
+  .crypto__freq-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .crypto__freq-table th, .crypto__freq-table td { border: 1px solid #ddd; padding: 3px 6px; text-align: center; }
+  .crypto__freq-table th { background: #eee; }
+  .crypto__freq-table td.crypto__freq-cell--matched { background: #fff3b0; }
+  .crypto__text { font-size: 18px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; }
+  .crypto__letter { cursor: pointer; padding: 1px 2px; border-radius: 3px; transition: background 0.1s; }
+  .crypto__letter:hover { background: #ffd54f; }
+  .crypto__letter--changed { background: #c8e6c9; color: #1b5e20; }
+  .crypto__letter--changed:hover { background: #a5d6a7; }
+  .crypto__letter--highlight { background: #ffeb3b !important; }
+  .crypto__controls { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .crypto__button { padding: 6px 12px; cursor: pointer; border: 1px solid #888; background: #fff; font-family: monospace; }
+  .crypto__button:hover { background: #eee; }
+  .crypto__button--primary { background: #2196f3; color: #fff; border-color: #1976d2; }
+  .crypto__button--primary:hover { background: #1976d2; }
+  .crypto__button--danger { background: #ef5350; color: #fff; border-color: #c62828; }
+  .crypto__button--danger:hover { background: #c62828; }
+  .crypto__select { padding: 6px 12px; border: 1px solid #888; background: #fff; font-family: monospace; cursor: pointer; }
+  .crypto__modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .crypto__modal { background: #fff; border: 1px solid #333; padding: 16px; min-width: 340px; max-width: 90vw; max-height: 85vh; overflow-y: auto; }
+  .crypto__modal-title { margin: 0 0 10px; font-size: 16px; }
+  .crypto__modal-hint { font-size: 12px; color: #555; margin-bottom: 10px; }
+  .crypto__modal-list { list-style: none; padding: 0; margin: 0 0 10px; display: flex; flex-wrap: wrap; gap: 4px; }
+  .crypto__modal-item { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 6px 8px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; background: #fff; min-width: 54px; transition: background 0.1s; }
+  .crypto__modal-item:hover { background: #fff3b0; }
+  .crypto__modal-item--best { background: #e3f2fd; border-color: #1976d2; font-weight: bold; }
+  .crypto__modal-item--best:hover { background: #bbdefb; }
+  .crypto__modal-item--taken { color: #aaa; background: #f5f5f5; cursor: not-allowed; text-decoration: line-through; }
+  .crypto__modal-item--taken:hover { background: #f5f5f5; }
+  .crypto__modal-item-letter { font-size: 16px; line-height: 1; }
+  .crypto__modal-item-freq { font-size: 10px; color: #666; margin-top: 2px; }
+  .crypto__modal-item--taken .crypto__modal-item-freq { color: #aaa; }
+  .crypto__mapping { font-size: 13px; }
+  .crypto__mapping-row { display: flex; gap: 6px; align-items: center; padding: 3px 0; border-bottom: 1px dashed #ddd; }
+  .crypto__mapping-from { font-weight: bold; }
+  .crypto__mapping-arrow { color: #888; }
+  .crypto__mapping-to { color: #2e7d32; font-weight: bold; }
+  .crypto__mapping-undo { margin-left: auto; font-size: 11px; padding: 2px 6px; }
+</style>
+</head>
+<body>
+
+<div class="crypto">
+  <h1 class="crypto__title">Cipher Decryption Using Frequency Analysis</h1>
+
+  <div class="crypto__section">
+    <p class="crypto__section-title">Language</p>
+    <div class="crypto__controls">
+      <select id="langSelect" class="crypto__select">
+        <option value="en">English</option>
+        <option value="ru">Russian</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="crypto__section">
+    <p class="crypto__section-title">1. Enter Encrypted Text</p>
+    <textarea id="inputText" class="crypto__input" placeholder="Paste your ciphertext here..."></textarea>
+    <div class="crypto__controls" style="margin-top:8px;">
+      <button id="analyzeBtn" class="crypto__button crypto__button--primary">Analyze</button>
+      <button id="resetBtn" class="crypto__button crypto__button--danger">Reset All Replacements</button>
+    </div>
+  </div>
+
+  <div class="crypto__section crypto__row">
+    <div class="crypto__col">
+      <p class="crypto__section-title">Reference Frequency Table</p>
+      <table class="crypto__freq-table" id="refFreqTable"></table>
+    </div>
+    <div class="crypto__col">
+      <p class="crypto__section-title">Current Frequency Table (in ciphertext)</p>
+      <table class="crypto__freq-table" id="curFreqTable"></table>
+    </div>
+  </div>
+
+  <div class="crypto__section">
+    <p class="crypto__section-title">Current Replacements</p>
+    <div id="mappingList" class="crypto__mapping">No replacements yet.</div>
+  </div>
+
+  <div class="crypto__section">
+    <p class="crypto__section-title">Text (click on a letter/_ to choose replacement; hover to highlight all occurrences)</p>
+    <div id="outputText" class="crypto__text">—</div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+
+<script>
+// --- Reference frequencies (as decimals, not percentages) ---
+const REF_FREQS = {
+  en: {
+    '_': 0.1800,
+    'e': 0.1270, 't': 0.0906, 'a': 0.0817, 'o': 0.0751, 'i': 0.0697,
+    'n': 0.0675, 's': 0.0633, 'h': 0.0609, 'r': 0.0599, 'd': 0.0425,
+    'l': 0.0403, 'c': 0.0278, 'u': 0.0276, 'm': 0.0241, 'w': 0.0236,
+    'f': 0.0223, 'g': 0.0202, 'y': 0.0197, 'p': 0.0193, 'b': 0.0149,
+    'v': 0.0098, 'k': 0.0077, 'j': 0.0015, 'x': 0.0015, 'q': 0.0010,
+    'z': 0.0007
+  },
+  ru: {
+    '_': 0.1700,
+    'о': 0.1097, 'е': 0.0845, 'а': 0.0801, 'и': 0.0735, 'н': 0.0670,
+    'т': 0.0626, 'с': 0.0547, 'р': 0.0473, 'в': 0.0454, 'л': 0.0440,
+    'к': 0.0349, 'м': 0.0321, 'д': 0.0298, 'п': 0.0281, 'у': 0.0262,
+    'я': 0.0201, 'ы': 0.0190, 'ь': 0.0174, 'г': 0.0170, 'з': 0.0165,
+    'б': 0.0159, 'ч': 0.0145, 'й': 0.0121, 'х': 0.0097, 'ж': 0.0094,
+    'ш': 0.0073, 'ю': 0.0064, 'ц': 0.0048, 'щ': 0.0036, 'э': 0.0032,
+    'ф': 0.0026, 'ё': 0.0004, 'ъ': 0.0004
+  }
+};
+
+// --- State ---
+let currentLang = 'en';
+let cipherText = '';
+let cipherFreq = {};
+let mapping = new Map();
+let history = [];
+
+// --- DOM ---
+const inputTextEl = document.getElementById('inputText');
+const analyzeBtn = document.getElementById('analyzeBtn');
+const resetBtn = document.getElementById('resetBtn');
+const langSelect = document.getElementById('langSelect');
+const refFreqTableEl = document.getElementById('refFreqTable');
+const curFreqTableEl = document.getElementById('curFreqTable');
+const outputTextEl = document.getElementById('outputText');
+const mappingListEl = document.getElementById('mappingList');
+const modalRoot = document.getElementById('modalRoot');
+
+// --- Utilities ---
+function getAlphabet() {
+  return Object.keys(REF_FREQS[currentLang]);
+}
+
+function getRefFreq() {
+  return REF_FREQS[currentLang];
+}
+
+function isLetter(ch, lang) {
+  if (lang === 'en') {
+    return /^[a-z]$/i.test(ch);
+  } else {
+    return /^[а-яё]$/i.test(ch);
+  }
+}
+
+function displayChar(s) {
+  if (s === ' ') return '_';
+  return s.toUpperCase();
+}
+
+function computeFreq(text, lang) {
+  const counts = {};
+  let total = 0;
+  for (const ch of text) {
+    let key;
+    if (isLetter(ch, lang)) {
+      key = ch.toLowerCase();
+    } else if (ch === '_') {
+      key = '_';
+    } else {
+      continue;
+    }
+    counts[key] = (counts[key] || 0) + 1;
+    total++;
+  }
+  const freq = {};
+  for (const k in counts) freq[k] = counts[k] / total;
+  return freq;
+}
+
+function renderFreqTable(tableEl, freqObj, highlightSymbol) {
+  const entries = Object.entries(freqObj).sort((a, b) => b[1] - a[1]);
+  if (entries.length === 0) {
+    tableEl.innerHTML = '<tr><td colspan="6">No data</td></tr>';
+    return;
+  }
+  let html = '<tr><th>Char</th><th>Freq</th><th>Char</th><th>Freq</th><th>Char</th><th>Freq</th></tr>';
+  for (let i = 0; i < entries.length; i += 3) {
+    html += '<tr>';
+    for (let j = 0; j < 3; j++) {
+      const entry = entries[i + j];
+      if (entry) {
+        const mark = (entry[0] === highlightSymbol) ? ' crypto__freq-cell--matched' : '';
+        html += `<td class="${mark}">${displayChar(entry[0])}</td><td class="${mark}">${(entry[1] * 100).toFixed(2)}%</td>`;
+      } else {
+        html += '<td></td><td></td>';
+      }
+    }
+    html += '</tr>';
+  }
+  tableEl.innerHTML = html;
+}
+
+// --- Text rendering ---
+function renderText() {
+  outputTextEl.innerHTML = '';
+  for (const ch of cipherText) {
+    let key;
+    if (isLetter(ch, currentLang)) {
+      key = ch.toLowerCase();
+    } else if (ch === '_') {
+      key = '_';
+    } else {
+      outputTextEl.appendChild(document.createTextNode(ch));
+      continue;
+    }
+    
+    const span = document.createElement('span');
+    span.className = 'crypto__letter';
+    span.dataset.cipher = key;
+    const replacement = mapping.get(key);
+    if (replacement) {
+      span.textContent = displayChar(replacement);
+      span.classList.add('crypto__letter--changed');
+      span.title = `${displayChar(key)} → ${displayChar(replacement)}`;
+    } else {
+      span.textContent = displayChar(key);
+      span.title = `${displayChar(key)} — click to replace`;
+    }
+    span.addEventListener('mouseenter', () => highlightSymbol(key, true));
+    span.addEventListener('mouseleave', () => highlightSymbol(key, false));
+    span.addEventListener('click', () => openReplaceModal(key));
+    outputTextEl.appendChild(span);
+  }
+}
+
+function highlightSymbol(symbol, on) {
+  const spans = outputTextEl.querySelectorAll(`.crypto__letter[data-cipher="${symbol}"]`);
+  spans.forEach(s => s.classList.toggle('crypto__letter--highlight', on));
+  renderFreqTable(curFreqTableEl, cipherFreq, on ? symbol : null);
+}
+
+// --- Mapping list rendering ---
+function renderMapping() {
+  if (mapping.size === 0) {
+    mappingListEl.textContent = 'No replacements yet.';
+    return;
+  }
+  mappingListEl.innerHTML = '';
+  for (const [from, to] of mapping.entries()) {
+    const row = document.createElement('div');
+    row.className = 'crypto__mapping-row';
+    row.innerHTML = `
+      <span class="crypto__mapping-from">${displayChar(from)}</span>
+      <span class="crypto__mapping-arrow">→</span>
+      <span class="crypto__mapping-to">${displayChar(to)}</span>
+      <button class="crypto__button crypto__mapping-undo" data-from="${from}">Undo</button>
+    `;
+    mappingListEl.appendChild(row);
+  }
+  mappingListEl.querySelectorAll('.crypto__mapping-undo').forEach(btn => {
+    btn.addEventListener('click', () => {
+      undoReplace(btn.dataset.from);
+    });
+  });
+}
+
+// --- Replacement modal ---
+function openReplaceModal(cipherSymbol) {
+  const curPct = cipherFreq[cipherSymbol] || 0;
+  const taken = new Set(mapping.values());
+  const alphabet = getAlphabet();
+  const refFreq = getRefFreq();
+  
+  let bestSymbol = null;
+  let bestDiff = Infinity;
+  for (const plainSymbol of alphabet) {
+    if (taken.has(plainSymbol)) continue;
+    const diff = Math.abs(refFreq[plainSymbol] - curPct);
+    if (diff < bestDiff) { bestDiff = diff; bestSymbol = plainSymbol; }
+  }
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'crypto__modal-backdrop';
+  const modal = document.createElement('div');
+  modal.className = 'crypto__modal';
+
+  const title = document.createElement('h3');
+  title.className = 'crypto__modal-title';
+  title.textContent = `Replace character "${displayChar(cipherSymbol)}"`;
+  modal.appendChild(title);
+
+  const hint = document.createElement('div');
+  hint.className = 'crypto__modal-hint';
+  hint.innerHTML = `Frequency in text: <b>${(curPct * 100).toFixed(2)}%</b>. ` +
+    (bestSymbol ? `Best match (available): <b>${displayChar(bestSymbol)}</b> (${(refFreq[bestSymbol] * 100).toFixed(2)}%).` : 'All characters are already taken.');
+  modal.appendChild(hint);
+
+  const list = document.createElement('ul');
+  list.className = 'crypto__modal-list';
+  const sorted = alphabet.slice().sort((a, b) => Math.abs(refFreq[a] - curPct) - Math.abs(refFreq[b] - curPct));
+  for (const plainSymbol of sorted) {
+    const li = document.createElement('li');
+    li.className = 'crypto__modal-item';
+    const isTaken = taken.has(plainSymbol);
+    const isBest = (plainSymbol === bestSymbol);
+    if (isBest) li.classList.add('crypto__modal-item--best');
+    if (isTaken) li.classList.add('crypto__modal-item--taken');
+
+    const letterSpan = document.createElement('span');
+    letterSpan.className = 'crypto__modal-item-letter';
+    letterSpan.textContent = displayChar(plainSymbol) + (isBest ? ' ★' : '');
+    const freqSpan = document.createElement('span');
+    freqSpan.className = 'crypto__modal-item-freq';
+    freqSpan.textContent = `${(refFreq[plainSymbol] * 100).toFixed(2)}%`;
+    li.appendChild(letterSpan);
+    li.appendChild(freqSpan);
+    li.title = isTaken ? 'taken' : (isBest ? 'best match' : '');
+
+    if (!isTaken) {
+      li.addEventListener('click', () => {
+        setReplace(cipherSymbol, plainSymbol);
+        closeModal();
+      });
+    }
+    list.appendChild(li);
+  }
+  modal.appendChild(list);
+
+  const controls = document.createElement('div');
+  controls.className = 'crypto__controls';
+  controls.style.marginTop = '12px';
+  const undoBtn = document.createElement('button');
+  undoBtn.className = 'crypto__button crypto__button--danger';
+  undoBtn.textContent = 'Undo Replacement';
+  undoBtn.disabled = !mapping.has(cipherSymbol);
+  undoBtn.addEventListener('click', () => {
+    undoReplace(cipherSymbol);
+    closeModal();
+  });
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'crypto__button';
+  closeBtn.textContent = 'Close';
+  closeBtn.addEventListener('click', closeModal);
+  controls.appendChild(undoBtn);
+  controls.appendChild(closeBtn);
+  modal.appendChild(controls);
+
+  backdrop.appendChild(modal);
+  backdrop.addEventListener('click', (e) => { if (e.target === backdrop) closeModal(); });
+  modalRoot.appendChild(backdrop);
+
+  function closeModal() {
+    if (modalRoot.contains(backdrop)) modalRoot.removeChild(backdrop);
+  }
+}
+
+// --- Replacements ---
+function setReplace(cipherSymbol, plainSymbol) {
+  history.push({ from: cipherSymbol, to: mapping.get(cipherSymbol) || null });
+  mapping.set(cipherSymbol, plainSymbol);
+  renderAll();
+}
+
+function undoReplace(cipherSymbol) {
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].from === cipherSymbol) {
+      const prev = history[i].to;
+      history.splice(i, 1);
+      if (prev === null) mapping.delete(cipherSymbol);
+      else mapping.set(cipherSymbol, prev);
+      renderAll();
+      return;
+    }
+  }
+  mapping.delete(cipherSymbol);
+  renderAll();
+}
+
+function resetAll() {
+  mapping.clear();
+  history = [];
+  renderAll();
+}
+
+// --- Render all ---
+function renderAll() {
+  renderFreqTable(refFreqTableEl, getRefFreq(), null);
+  renderFreqTable(curFreqTableEl, cipherFreq, null);
+  renderText();
+  renderMapping();
+}
+
+// --- Language change ---
+langSelect.addEventListener('change', () => {
+  currentLang = langSelect.value;
+  document.documentElement.lang = currentLang;
+  
+  if (currentLang === 'en') {
+    document.querySelector('.crypto__title').textContent = 'Cipher Decryption Using Frequency Analysis';
+    document.querySelectorAll('.crypto__section-title')[0].textContent = 'Language';
+    document.querySelectorAll('.crypto__section-title')[1].textContent = '1. Enter Encrypted Text';
+    document.querySelector('#inputText').placeholder = 'Paste your ciphertext here...';
+    document.querySelector('#analyzeBtn').textContent = 'Analyze';
+    document.querySelector('#resetBtn').textContent = 'Reset All Replacements';
+    document.querySelectorAll('.crypto__section-title')[2].textContent = 'Reference Frequency Table';
+    document.querySelectorAll('.crypto__section-title')[3].textContent = 'Current Frequency Table (in ciphertext)';
+    document.querySelectorAll('.crypto__section-title')[4].textContent = 'Current Replacements';
+    document.querySelectorAll('.crypto__section-title')[5].textContent = 'Text (click on a letter/_ to choose replacement; hover to highlight all occurrences)';
+    document.title = 'Frequency Analysis - Cipher Decryption Tool | English & Russian';
+  } else {
+    document.querySelector('.crypto__title').textContent = 'Расшифровка текста методом частотного анализа';
+    document.querySelectorAll('.crypto__section-title')[0].textContent = 'Язык';
+    document.querySelectorAll('.crypto__section-title')[1].textContent = '1. Введите зашифрованный текст';
+    document.querySelector('#inputText').placeholder = 'Вставьте сюда шифртекст...';
+    document.querySelector('#analyzeBtn').textContent = 'Анализировать';
+    document.querySelector('#resetBtn').textContent = 'Сбросить все замены';
+    document.querySelectorAll('.crypto__section-title')[2].textContent = 'Эталонная таблица частот';
+    document.querySelectorAll('.crypto__section-title')[3].textContent = 'Текущая таблица частот (в шифртексте)';
+    document.querySelectorAll('.crypto__section-title')[4].textContent = 'Текущие замены';
+    document.querySelectorAll('.crypto__section-title')[5].textContent = 'Текст (клик по букве/_ — выбрать замену; наведение — подсветить все вхождения)';
+    document.title = 'Частотный анализ — Расшифровка шифров | Английский и Русский';
+  }
+  
+  mapping.clear();
+  history = [];
+  renderAll();
+});
+
+// --- Analyze button ---
+analyzeBtn.addEventListener('click', () => {
+  cipherText = inputTextEl.value;
+  const letterPattern = currentLang === 'en' ? /[^a-z_]/gi : /[^а-яё_]/gi;
+  cipherText = cipherText.replace(letterPattern, '');
+  if (!cipherText.trim()) {
+    alert(currentLang === 'en' ? 'Please enter text for analysis.' : 'Введите текст для анализа.');
+    return;
+  }
+  cipherFreq = computeFreq(cipherText, currentLang);
+  mapping.clear();
+  history = [];
+  renderAll();
+});
+
+resetBtn.addEventListener('click', () => {
+  const msg = currentLang === 'en' ? 'Reset all replacements?' : 'Сбросить все замены?';
+  if (confirm(msg)) resetAll();
+});
+
+// --- Initialize ---
+renderFreqTable(refFreqTableEl, getRefFreq(), null);
+renderFreqTable(curFreqTableEl, {}, null);
+</script>
+
+</body>
+</html>
