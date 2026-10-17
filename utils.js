@@ -3,12 +3,12 @@ window.FA = window.FA || {};
 
 FA.LETTER_RE = {
   en: /^[a-z]$/i,
-  ru: /^[а-яё]$/i
+  ru: /^[а-я]$/i
 };
 
 FA.STRIP_RE = {
   en: /[^a-z_]/gi,
-  ru: /[^а-яё_]/gi
+  ru: /[^а-я_]/gi
 };
 
 FA.isLetter = function (ch, lang) {
@@ -112,17 +112,14 @@ FA.vigenereReport = function (text, lang, refFreq, maxL) {
     if (k !== null) keys.push(k);
   }
   const n = keys.length;
-  // Алфавит A: буквы языка, а '_' входит в него только если встречается в тексте.
-  const hasSpace = keys.includes('_');
-  const alphabet = {};
-  for (const k in refFreq) if (k !== '_' || hasSpace) alphabet[k] = refFreq[k];
-  const alphabetSize = Object.keys(alphabet).length;
+  // Алфавит A: буквы языка и '_' (пробел есть во всех алфавитах).
+  const alphabetSize = Object.keys(refFreq).length;
   const ri = 1 / alphabetSize;
-  const im = FA.sourceIndex(alphabet);
+  const im = FA.sourceIndex(refFreq);
   const ic = FA.indexOfCoincidence(keys);
 
   const report = {
-    n, alphabetSize, hasSpace, ri, im, ic,
+    n, alphabetSize, ri, im, ic,
     lExact: null, lAsym: null, threshold: ri + (im - ri) / 2,
     rows: [], candidate: null, verdict: 'unclear', tooShort: ic === null
   };
@@ -148,6 +145,137 @@ FA.vigenereReport = function (text, lang, refFreq, maxL) {
     report.verdict = first.l === 1 ? 'mono' : 'vigenere';
   }
   return report;
+};
+
+// ---------- Подбор ключа Вижинера ----------
+// Алфавит A = FA.ALPHABETS[lang]; номер символа — его значение. Шифр: c = (p + k) mod |A|.
+
+FA.formatSignedPct = function (value) {
+  return (value >= 0 ? '+' : '') + (value * 100).toFixed(2) + '%';
+};
+
+FA.normalizeFreq = function (freq) {
+  const total = Object.values(freq).reduce((s, v) => s + v, 0);
+  const out = {};
+  for (const k in freq) out[k] = freq[k] / total;
+  return out;
+};
+
+FA.indexMap = function (lang) {
+  const map = {};
+  FA.ALPHABETS[lang].forEach((s, i) => { map[s] = i; });
+  return map;
+};
+
+// Текст -> массив символов алфавита (буквы в нижнем регистре и '_').
+FA.textSymbols = function (text, lang) {
+  const out = [];
+  for (const ch of text) {
+    const k = FA.symbolKey(ch, lang);
+    if (k !== null) out.push(k);
+  }
+  return out;
+};
+
+// Группа j (с нуля) = символы на позициях j, j + l, j + 2l, ...
+FA.splitGroups = function (symbols, l) {
+  const groups = Array.from({ length: l }, () => []);
+  symbols.forEach((s, i) => groups[i % l].push(s));
+  return groups;
+};
+
+// Анализ одной группы (это шифр Цезаря со сдвигом k):
+//  freq[i]       — доля символа с номером i в группе;
+//  suggested     — сдвиг, при котором самый частый символ группы переходит в '_';
+//  mismatch[s]   — несовпадение с эталоном при сдвиге s: сумма |частота - эталон| / 2 (0 = идеально);
+//  best          — три сдвига с наименьшим несовпадением.
+FA.analyzeGroup = function (groupSymbols, lang) {
+  const alphabet = FA.ALPHABETS[lang];
+  const N = alphabet.length;
+  const idx = FA.indexMap(lang);
+  const ref = FA.normalizeFreq(FA.REF_FREQS[lang]);
+  const n = groupSymbols.length;
+
+  const counts = new Array(N).fill(0);
+  for (const s of groupSymbols) counts[idx[s]]++;
+  const freq = counts.map(c => (n ? c / n : 0));
+
+  // При сдвиге s символ с номером i расшифровывается в (i - s) mod N.
+  const mismatch = [];
+  for (let s = 0; s < N; s++) {
+    let sum = 0;
+    for (let i = 0; i < N; i++) sum += Math.abs(freq[i] - ref[alphabet[(i - s + N) % N]]);
+    mismatch.push(sum / 2);
+  }
+
+  let top = 0;
+  for (let i = 1; i < N; i++) if (counts[i] > counts[top]) top = i;
+  const suggested = (top - idx['_'] + N) % N;
+
+  const best = mismatch
+    .map((m, shift) => ({ shift, mismatch: m }))
+    .sort((a, b) => a.mismatch - b.mismatch)
+    .slice(0, 3);
+
+  return { n, counts, freq, mismatch, suggested, best };
+};
+
+// Строки таблицы группы при выбранном сдвиге: шифрсимвол -> расшифрованный, частота в группе,
+// эталонная частота расшифрованного символа (нормирована), разница.
+FA.groupTable = function (analysis, lang, shift, limit) {
+  const alphabet = FA.ALPHABETS[lang];
+  const N = alphabet.length;
+  const ref = FA.normalizeFreq(FA.REF_FREQS[lang]);
+  const rows = [];
+  for (let i = 0; i < N; i++) {
+    if (!analysis.counts[i]) continue;
+    const plain = alphabet[(i - shift + N) % N];
+    rows.push({
+      cipher: alphabet[i],
+      plain,
+      freq: analysis.freq[i],
+      ref: ref[plain],
+      diff: analysis.freq[i] - ref[plain]
+    });
+  }
+  rows.sort((a, b) => b.freq - a.freq);
+  return rows.slice(0, limit || 10);
+};
+
+// Расшифровка: p_i = (c_i - k_(i mod l)) mod |A|. Возвращает массив символов.
+FA.vigenereDecrypt = function (symbols, shifts, lang) {
+  const alphabet = FA.ALPHABETS[lang];
+  const N = alphabet.length;
+  const idx = FA.indexMap(lang);
+  const l = shifts.length;
+  return symbols.map((s, i) => alphabet[(idx[s] - shifts[i % l] + N * 2) % N]);
+};
+
+// ---------- Подсветка при наведении ----------
+// Намеренно НЕ через реактивное состояние Alpine: пока «текущий символ под курсором» лежал в данных,
+// каждое наведение заново считало привязки :class всех N букв текста. И не через CSS :has(): на большом
+// тексте браузер переоценивает все элементы с data-k (на 20 000 букв это +150 мс на каждое движение).
+// Здесь класс переключается напрямую у совпадающих элементов — их обычно несколько десятков.
+// Состояние (что подсвечено сейчас) хранится в root.dataset.hl<attr>.
+FA.setHighlight = function (root, attr, value, selectorFor) {
+  if (!root) return;
+  const key = 'hl' + attr;
+  const next = value === null || value === undefined ? '' : String(value);
+  if ((root.dataset[key] || '') === next) return;
+  root.dataset[key] = next;
+  const cls = 'crypto__hl-' + attr;
+  root.querySelectorAll('.' + cls).forEach(el => el.classList.remove(cls));
+  if (next !== '') root.querySelectorAll(selectorFor(next)).forEach(el => el.classList.add(cls));
+};
+
+// Буква текста: подсвечивает все элементы с тем же data-k — буквы текста и ячейки таблицы частот.
+FA.highlightSymbol = function (root, symbol) {
+  FA.setHighlight(root, 'k', symbol, v => `[data-k="${v}"]`);
+};
+
+// Группа Вижинера: подсвечивает позиции группы в расшифрованном тексте.
+FA.highlightGroup = function (root, group) {
+  FA.setHighlight(root, 'g', group, v => `.crypto__dec[data-g="${v}"]`);
 };
 
 // Кандидаты на замену: все символы алфавита, отсортированные по близости частоты.

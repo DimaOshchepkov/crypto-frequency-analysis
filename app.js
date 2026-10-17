@@ -8,9 +8,14 @@ document.addEventListener('alpine:init', () => {
     cipherFreq: {},
     mapping: {},        // зашифрованный символ -> выбранная замена
     history: [],        // стек { from, to } для отмены
-    hovered: null,      // символ под курсором
     modalSymbol: null,  // символ, для которого открыто окно замены
     vig: null,          // отчёт «это Вижинер?» (null — окно закрыто)
+
+    // Подбор ключа Вижинера
+    vigL: '',           // введённое число групп l
+    lHint: null,        // подсказка по l из расчёта индекса совпадений
+    split: null,        // { l, symbols, groups } после разбиения на группы
+    shifts: [],         // выбранный сдвиг (номер буквы ключа) для каждой группы
 
     init() {
       this.$watch('lang', () => {
@@ -19,6 +24,9 @@ document.addEventListener('alpine:init', () => {
         this.closeModal();
         this.closeVig();
         this.clearMapping();
+        this.resetSplit();
+        this.lHint = null;
+        this.vigL = '';
       });
     },
 
@@ -98,10 +106,37 @@ document.addEventListener('alpine:init', () => {
       return this.t('vigVerdictUnclear');
     },
 
+    // Алфавит Вижинера: буквы по порядку, '_' последним; номер символа = его сдвиг.
+    get orderedAlphabet() { return FA.ALPHABETS[this.lang]; },
+
+    // Ключ строкой: буква на каждую группу.
+    get keyString() {
+      return this.shifts.map(s => FA.displayChar(this.orderedAlphabet[s])).join('');
+    },
+
+    // Расшифрованный текст как массив символов.
+    get decrypted() {
+      if (!this.split) return [];
+      return FA.vigenereDecrypt(this.split.symbols, this.shifts, this.lang);
+    },
+
+    get vigHintText() {
+      const h = this.lHint;
+      if (!h) return '';
+      if (!h.candidate) return this.t('vigHintNone');
+      const exact = h.lExact === null ? '—' : h.lExact.toFixed(2);
+      return this.t('vigHint', { l: h.candidate, exact });
+    },
+
     // --- хелперы для шаблона ---
     show: FA.displayChar,
     pct: FA.formatPct,
+    signed: FA.formatSignedPct,
     fmt: FA.fmt,
+
+    groupTable(group, j) {
+      return FA.groupTable(group, this.lang, this.shifts[j], 10);
+    },
 
     // --- действия ---
     analyze() {
@@ -110,9 +145,56 @@ document.addEventListener('alpine:init', () => {
         alert(this.t('emptyText'));
         return;
       }
+      FA.highlightSymbol(this.$root, null); // элементы текста пересоздаются — сбрасываем подсветку
       this.cipherText = cleaned;
       this.cipherFreq = FA.computeFreq(cleaned, this.lang);
       this.clearMapping();
+      this.resetSplit();
+
+      // Подсказка для l: считаем так же, как в окне «это Вижинер?».
+      const report = FA.vigenereReport(cleaned, this.lang, this.refFreq, 20);
+      this.lHint = report.tooShort ? null : { candidate: report.candidate, lExact: report.lExact };
+      this.vigL = this.lHint && this.lHint.candidate ? String(this.lHint.candidate) : '';
+    },
+
+    // --- подбор ключа Вижинера ---
+    resetSplit() {
+      this.split = null;
+      this.shifts = [];
+    },
+
+    splitIntoGroups() {
+      if (!this.cipherText) {
+        alert(this.t('vigNeedText'));
+        return;
+      }
+      const symbols = FA.textSymbols(this.cipherText, this.lang);
+      if (symbols.length < 2) {
+        alert(this.t('vigTooShort'));
+        return;
+      }
+      const max = Math.min(40, Math.floor(symbols.length / 2));
+      const l = parseInt(this.vigL, 10);
+      if (!(l >= 1 && l <= max)) {
+        alert(this.t('vigBadL', { max }));
+        return;
+      }
+      FA.highlightGroup(this.$root, null);
+      const groups = FA.splitGroups(symbols, l).map(g => FA.analyzeGroup(g, this.lang));
+      this.split = { l, symbols, groups };
+      // По умолчанию — сдвиг с лучшим совпадением по всей таблице: правило «самый частый → _»
+      // иногда ошибается на коротких группах, оно остаётся отдельной подсказкой в карточке.
+      this.shifts = groups.map(g => g.best[0].shift);
+    },
+
+    // Ввод ключа строкой: буква i задаёт сдвиг группы i. Нераспознанные символы пропускаются.
+    setKey(str) {
+      if (!this.split) return;
+      const alphabet = this.orderedAlphabet;
+      Array.from(str.toLowerCase()).slice(0, this.split.l).forEach((ch, j) => {
+        const s = alphabet.indexOf(ch);
+        if (s >= 0) this.shifts[j] = s;
+      });
     },
 
     setReplace(from, to) {
@@ -143,6 +225,22 @@ document.addEventListener('alpine:init', () => {
     },
 
     openModal(symbol) { this.modalSymbol = symbol; },
+
+    // Клик по тексту: один обработчик на контейнере, символ берём из data-k нажатого элемента.
+    openFromEvent(event) {
+      const el = event.target;
+      const symbol = el && el.dataset ? el.dataset.k : undefined;
+      if (symbol !== undefined) this.openModal(symbol);
+    },
+
+    // Подсветка всех вхождений при наведении — без реактивного состояния, см. FA.setHighlight.
+    hoverText(event) {
+      const el = event.target;
+      const symbol = el && el.dataset ? el.dataset.k : undefined;
+      FA.highlightSymbol(this.$root, symbol === undefined ? null : symbol);
+    },
+    leaveText() { FA.highlightSymbol(this.$root, null); },
+    highlightGroup(j) { FA.highlightGroup(this.$root, j); },
     closeModal() { this.modalSymbol = null; },
 
     openVig() {

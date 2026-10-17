@@ -19,10 +19,10 @@
 <link rel="stylesheet" href="styles.css">
 
 <!-- Порядок важен: данные -> i18n -> утилиты -> компонент -> Alpine -->
-<script src="frequencies.js"></script>
-<script src="i18n.js"></script>
-<script src="utils.js"></script>
-<script src="app.js"></script>
+<script defer src="frequencies.js"></script>
+<script defer src="i18n.js"></script>
+<script defer src="utils.js"></script>
+<script defer src="app.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
 </head>
 <body>
@@ -57,6 +57,99 @@
     <div class="crypto__controls">
       <button class="crypto__button crypto__button--primary" @click="openVig()" x-text="t('vigShow')"></button>
     </div>
+  </div>
+
+  <!-- Подбор ключа Вижинера -->
+  <div class="crypto__section">
+    <p class="crypto__section-title" x-text="t('vigKeyTitle')"></p>
+    <p class="crypto__modal-hint" x-show="!cipherText" x-text="t('vigNeedText')"></p>
+
+    <div x-show="cipherText">
+      <p class="crypto__modal-hint" x-show="lHint" x-text="vigHintText"></p>
+      <div class="crypto__controls">
+        <label for="vigL" x-text="t('vigGroupsLabel')"></label>
+        <input id="vigL" type="number" min="1" class="crypto__number" x-model="vigL" @keydown.enter="splitIntoGroups()">
+        <button class="crypto__button crypto__button--primary" @click="splitIntoGroups()" x-text="t('vigSplit')"></button>
+      </div>
+    </div>
+
+    <template x-if="split">
+      <div>
+        <div class="crypto__key">
+          <b x-text="t('vigKey')"></b>
+          <input class="crypto__key-input" spellcheck="false"
+                 :value="keyString"
+                 @change="setKey($event.target.value); $event.target.value = keyString">
+          <span class="crypto__key-shifts" x-text="t('vigKeyShifts') + ': ' + shifts.join(', ')"></span>
+        </div>
+
+        <p class="crypto__section-title" x-text="t('vigDecrypted')"></p>
+        <!-- Без пробелов между тегами: у контейнера white-space: pre-wrap -->
+        <div class="crypto__text"><template x-for="(s, i) in decrypted" :key="i"><span class="crypto__dec"
+            :data-g="i % split.l"
+            x-text="show(s)"></span></template></div>
+
+        <p class="crypto__modal-hint" style="margin-top:12px;" x-text="t('vigTableNote')"></p>
+
+        <div class="crypto__groups">
+          <template x-for="(g, j) in split.groups" :key="j">
+            <div class="crypto__group-card" :data-g="j" @mouseenter="highlightGroup(j)" @mouseleave="highlightGroup(null)">
+              <div class="crypto__group-head">
+                <b x-text="t('vigGroup', { j: j + 1 })"></b>
+                <span x-text="t('vigGroupLen', { n: g.n })"></span>
+              </div>
+
+              <div class="crypto__controls">
+                <span x-text="t('vigKeyLetter')"></span>
+                <select class="crypto__select" @change="shifts[j] = Number($event.target.value)">
+                  <template x-for="(a, s) in orderedAlphabet" :key="s">
+                    <option :value="s" :selected="s === shifts[j]" x-text="show(a) + ' (' + s + ')'"></option>
+                  </template>
+                </select>
+                <span x-text="t('vigMismatch') + ': ' + pct(g.mismatch[shifts[j]])"></span>
+              </div>
+
+              <div class="crypto__chips">
+                <span x-text="t('vigSuggested')"></span>
+                <button class="crypto__chip" :class="{ 'crypto__chip--active': shifts[j] === g.suggested }"
+                        @click="shifts[j] = g.suggested" x-text="show(orderedAlphabet[g.suggested])"></button>
+              </div>
+              <div class="crypto__chips">
+                <span x-text="t('vigBest')"></span>
+                <template x-for="b in g.best" :key="b.shift">
+                  <button class="crypto__chip" :class="{ 'crypto__chip--active': shifts[j] === b.shift }"
+                          @click="shifts[j] = b.shift"
+                          x-text="show(orderedAlphabet[b.shift]) + ' ' + pct(b.mismatch)"></button>
+                </template>
+              </div>
+
+              <table class="crypto__freq-table">
+                <thead>
+                  <tr>
+                    <th x-text="t('vigColCipher')"></th>
+                    <th x-text="t('vigColPlain')"></th>
+                    <th x-text="t('vigColGroup')"></th>
+                    <th x-text="t('vigColRef')"></th>
+                    <th x-text="t('vigColDiff')"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="r in groupTable(g, j)" :key="r.cipher">
+                    <tr>
+                      <td x-text="show(r.cipher)"></td>
+                      <td x-text="show(r.plain)"></td>
+                      <td x-text="pct(r.freq)"></td>
+                      <td x-text="pct(r.ref)"></td>
+                      <td x-text="signed(r.diff)"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
   </div>
 
   <!-- Таблицы частот -->
@@ -98,7 +191,7 @@
           <template x-for="(row, r) in curRows" :key="r">
             <tr>
               <template x-for="(cell, c) in row" :key="c">
-                <td :class="{ 'crypto__freq-cell--matched': cell.symbol !== null && cell.symbol === hovered }" x-text="cell.text"></td>
+                <td :data-k="cell.symbol" x-text="cell.text"></td>
               </template>
             </tr>
           </template>
@@ -127,17 +220,16 @@
   <div class="crypto__section">
     <p class="crypto__section-title" x-text="t('textTitle')"></p>
     <!-- Без пробелов между тегами: у контейнера white-space: pre-wrap -->
-    <div class="crypto__text"><span x-show="!cipherText">—</span><template x-for="(tok, i) in tokens" :key="i"><span
+    <!-- Клик и наведение обрабатываются одним обработчиком на контейнере (делегирование по data-k);
+         подсветка переключает класс напрямую в DOM, без реактивного состояния — см. FA.setHighlight. -->
+    <div class="crypto__text" @click="openFromEvent($event)" @mouseover="hoverText($event)" @mouseleave="leaveText()"><span x-show="!cipherText">—</span><template x-for="(tok, i) in tokens" :key="i"><span
         :class="{
           'crypto__letter': tok.key !== null,
-          'crypto__letter--changed': tok.key !== null && !!mapping[tok.key],
-          'crypto__letter--highlight': tok.key !== null && hovered === tok.key
+          'crypto__letter--changed': tok.key !== null && !!mapping[tok.key]
         }"
+        :data-k="tok.key"
         :title="tok.key === null ? null : (mapping[tok.key] ? show(tok.key) + ' → ' + show(mapping[tok.key]) : t('clickToReplace', { char: show(tok.key) }))"
-        x-text="tok.key === null ? tok.ch : show(mapping[tok.key] || tok.key)"
-        @mouseenter="if (tok.key !== null) hovered = tok.key"
-        @mouseleave="hovered = null"
-        @click="if (tok.key !== null) openModal(tok.key)"></span></template></div>
+        x-text="tok.key === null ? tok.ch : show(mapping[tok.key] || tok.key)"></span></template></div>
   </div>
 
   <!-- Окно выбора замены -->
@@ -197,7 +289,7 @@
           <div>
             <div class="crypto__vig-basics">
               <span><span x-text="t('vigN')"></span>: <b x-text="vig.n"></b></span>
-              <span><span x-text="t('vigAlpha')"></span>: <b x-text="vig.alphabetSize"></b> (<span x-text="vig.hasSpace ? t('vigAlphaSpace') : t('vigAlphaNoSpace')"></span>)</span>
+              <span><span x-text="t('vigAlpha')"></span>: <b x-text="vig.alphabetSize"></b> (<span x-text="t('vigAlphaSpace')"></span>)</span>
             </div>
 
             <p class="crypto__section-title" x-text="t('vigFormulas')"></p>
