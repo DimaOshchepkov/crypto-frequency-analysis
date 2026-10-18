@@ -65,14 +65,25 @@ body { font-family: monospace; margin: 16px; background: #fafafa; color: #222; }
 .crypto__key { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
 .crypto__key-input { font-family: monospace; font-size: 18px; letter-spacing: 2px; padding: 4px 8px; border: 1px solid #888; min-width: 200px; }
 .crypto__key-shifts { font-size: 12px; color: #555; }
-.crypto__groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin-top: 12px; }
-.crypto__group-card { border: 1px solid #ccc; padding: 8px; background: #fcfcfc; }
-.crypto__group-card:hover { border-color: #1976d2; }
-.crypto__group-head { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px; }
-.crypto__chips { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; font-size: 12px; margin-bottom: 6px; }
-.crypto__chip { padding: 2px 8px; cursor: pointer; border: 1px solid #888; background: #fff; font-family: monospace; font-size: 12px; border-radius: 10px; }
-.crypto__chip:hover { background: #eee; }
-.crypto__chip--active { background: #2196f3; color: #fff; border-color: #1976d2; }
+.crypto__vigbox { display: flex; gap: 16px; align-items: flex-start; }
+.crypto__vigbox-text { flex: 1 1 0; min-width: 0; }
+/* Группы остаются на экране, пока прокручивается длинный текст слева */
+.crypto__vigbox-groups { flex: 0 0 270px; position: sticky; top: 8px; max-height: calc(100vh - 16px); overflow-y: auto; }
+.crypto__group-row { margin-bottom: 6px; padding: 6px 8px; border: 1px solid #ccc; background: #fcfcfc; }
+.crypto__group-row:hover { border-color: #1976d2; }
+.crypto__group-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.crypto__group-hint { margin-top: 4px; font-size: 11px; color: #555; }
+@media (max-width: 760px) {
+  .crypto__vigbox { flex-direction: column; }
+  .crypto__vigbox-groups { position: static; flex-basis: auto; width: 100%; max-height: none; }
+}
+
+/* Окно «Алфавит» */
+.crypto__alpha-input { width: 100%; letter-spacing: 3px; }
+.crypto__alpha-cells { display: flex; flex-wrap: wrap; gap: 3px; margin: 10px 0 6px; }
+.crypto__alpha-cell { display: flex; flex-direction: column; align-items: center; min-width: 30px; padding: 3px 4px; border: 1px solid #ccc; background: #fafafa; }
+.crypto__alpha-cell b { font-size: 16px; }
+.crypto__alpha-cell small { font-size: 10px; color: #777; }
 
 /* Проверка на шифр Вижинера */
 .crypto__vig-question { font-size: 16px; font-weight: bold; margin: 0 0 8px; }

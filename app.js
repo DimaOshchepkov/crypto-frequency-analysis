@@ -17,12 +17,19 @@ document.addEventListener('alpine:init', () => {
     split: null,        // { l, symbols, groups } после разбиения на группы
     shifts: [],         // выбранный сдвиг (номер буквы ключа) для каждой группы
 
+    // Алфавит Вижинера (редактируется в окне «Алфавит»)
+    alphaStr: FA.ALPHABETS.en.join(''),
+    alphaOpen: false,
+    alphaDraft: '',
+
     init() {
       this.$watch('lang', () => {
         document.documentElement.lang = this.lang;
         document.title = this.t('pageTitle');
         this.closeModal();
         this.closeVig();
+        this.alphaOpen = false;
+        this.alphaStr = FA.ALPHABETS[this.lang].join('');
         this.clearMapping();
         this.resetSplit();
         this.lHint = null;
@@ -107,7 +114,8 @@ document.addEventListener('alpine:init', () => {
     },
 
     // Алфавит Вижинера: буквы по порядку, '_' последним; номер символа = его сдвиг.
-    get orderedAlphabet() { return FA.ALPHABETS[this.lang]; },
+    get orderedAlphabet() { return FA.parseAlphabet(this.alphaStr).list; },
+    get alphaDraftInfo() { return FA.parseAlphabet(this.alphaDraft); },
 
     // Ключ строкой: буква на каждую группу.
     get keyString() {
@@ -117,7 +125,7 @@ document.addEventListener('alpine:init', () => {
     // Расшифрованный текст как массив символов.
     get decrypted() {
       if (!this.split) return [];
-      return FA.vigenereDecrypt(this.split.symbols, this.shifts, this.lang);
+      return FA.vigenereDecrypt(this.split.symbols, this.shifts, this.orderedAlphabet);
     },
 
     get vigHintText() {
@@ -131,11 +139,18 @@ document.addEventListener('alpine:init', () => {
     // --- хелперы для шаблона ---
     show: FA.displayChar,
     pct: FA.formatPct,
-    signed: FA.formatSignedPct,
     fmt: FA.fmt,
 
-    groupTable(group, j) {
-      return FA.groupTable(group, this.lang, this.shifts[j], 10);
+    // Подсказка под выбором буквы ключа: оценка по пробелу и по таблице частот.
+    groupHint(g) {
+      const letter = shift => FA.displayChar(this.orderedAlphabet[shift]);
+      return this.t('vigTopSymbol', {
+        n: g.n,
+        symbol: FA.displayChar(g.topSymbol),
+        pct: FA.formatPct(g.topFreq),
+        space: letter(g.bySpace),
+        fit: letter(g.byFit)
+      });
     },
 
     // --- действия ---
@@ -179,12 +194,18 @@ document.addEventListener('alpine:init', () => {
         alert(this.t('vigBadL', { max }));
         return;
       }
+      const known = new Set(this.orderedAlphabet);
+      const missing = [...new Set(symbols.filter(x => !known.has(x)))];
+      if (missing.length) {
+        alert(this.t('alphaMissing', { chars: missing.map(FA.displayChar).join(' ') }));
+        return;
+      }
       FA.highlightGroup(this.$root, null);
-      const groups = FA.splitGroups(symbols, l).map(g => FA.analyzeGroup(g, this.lang));
+      const groups = FA.splitGroups(symbols, l).map(g => FA.analyzeGroup(g, this.lang, this.orderedAlphabet));
       this.split = { l, symbols, groups };
-      // По умолчанию — сдвиг с лучшим совпадением по всей таблице: правило «самый частый → _»
-      // иногда ошибается на коротких группах, оно остаётся отдельной подсказкой в карточке.
-      this.shifts = groups.map(g => g.best[0].shift);
+      // По умолчанию — подбор по таблице частот (устойчивее, чем «самый частый символ → пробел»);
+      // оба варианта показаны под выбором буквы, при расхождении букву можно выбрать вручную.
+      this.shifts = groups.map(g => g.byFit);
     },
 
     // Ввод ключа строкой: буква i задаёт сдвиг группы i. Нераспознанные символы пропускаются.
@@ -242,6 +263,19 @@ document.addEventListener('alpine:init', () => {
     leaveText() { FA.highlightSymbol(this.$root, null); },
     highlightGroup(j) { FA.highlightGroup(this.$root, j); },
     closeModal() { this.modalSymbol = null; },
+
+    openAlpha() {
+      this.alphaDraft = this.alphaStr;
+      this.alphaOpen = true;
+    },
+    closeAlpha() { this.alphaOpen = false; },
+    applyAlpha() {
+      if (this.alphaDraftInfo.error) return;
+      this.alphaStr = this.alphaDraftInfo.list.join('');
+      this.resetSplit();
+      this.alphaOpen = false;
+    },
+    resetAlpha() { this.alphaDraft = FA.ALPHABETS[this.lang].join(''); },
 
     openVig() {
       if (!this.cipherText) {

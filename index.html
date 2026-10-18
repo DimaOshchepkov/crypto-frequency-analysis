@@ -27,7 +27,7 @@
 </head>
 <body>
 
-<div class="crypto" x-data="freqApp" x-cloak @keydown.escape.window="closeModal(); closeVig()">
+<div class="crypto" x-data="freqApp" x-cloak @keydown.escape.window="closeModal(); closeVig(); closeAlpha()">
   <h1 class="crypto__title" x-text="t('title')">Cipher Decryption Using Frequency Analysis</h1>
 
   <!-- Язык -->
@@ -70,6 +70,7 @@
         <label for="vigL" x-text="t('vigGroupsLabel')"></label>
         <input id="vigL" type="number" min="1" class="crypto__number" x-model="vigL" @keydown.enter="splitIntoGroups()">
         <button class="crypto__button crypto__button--primary" @click="splitIntoGroups()" x-text="t('vigSplit')"></button>
+        <button class="crypto__button" @click="openAlpha()" x-text="t('alphaButton')"></button>
       </div>
     </div>
 
@@ -83,70 +84,32 @@
           <span class="crypto__key-shifts" x-text="t('vigKeyShifts') + ': ' + shifts.join(', ')"></span>
         </div>
 
-        <p class="crypto__section-title" x-text="t('vigDecrypted')"></p>
-        <!-- Без пробелов между тегами: у контейнера white-space: pre-wrap -->
-        <div class="crypto__text"><template x-for="(s, i) in decrypted" :key="i"><span class="crypto__dec"
-            :data-g="i % split.l"
-            x-text="show(s)"></span></template></div>
+        <div class="crypto__vigbox">
+          <!-- Слева — расшифрованный текст -->
+          <div class="crypto__vigbox-text">
+            <p class="crypto__section-title" x-text="t('vigDecrypted')"></p>
+            <!-- Без пробелов между тегами: у контейнера white-space: pre-wrap -->
+            <div class="crypto__text"><template x-for="(s, i) in decrypted" :key="i"><span class="crypto__dec"
+                :data-g="i % split.l"
+                x-text="show(s)"></span></template></div>
+          </div>
 
-        <p class="crypto__modal-hint" style="margin-top:12px;" x-text="t('vigTableNote')"></p>
-
-        <div class="crypto__groups">
-          <template x-for="(g, j) in split.groups" :key="j">
-            <div class="crypto__group-card" :data-g="j" @mouseenter="highlightGroup(j)" @mouseleave="highlightGroup(null)">
-              <div class="crypto__group-head">
-                <b x-text="t('vigGroup', { j: j + 1 })"></b>
-                <span x-text="t('vigGroupLen', { n: g.n })"></span>
+          <!-- Справа — по строке на группу: выбор буквы ключа и подсказка по пробелу -->
+          <div class="crypto__vigbox-groups">
+            <template x-for="(g, j) in split.groups" :key="j">
+              <div class="crypto__group-row" @mouseenter="highlightGroup(j)" @mouseleave="highlightGroup(null)">
+                <div class="crypto__group-line">
+                  <b x-text="t('vigGroup', { j: j + 1 })"></b>
+                  <select class="crypto__select" @change="shifts[j] = Number($event.target.value)">
+                    <template x-for="(a, s) in orderedAlphabet" :key="s">
+                      <option :value="s" :selected="s === shifts[j]" x-text="show(a) + ' (' + s + ')'"></option>
+                    </template>
+                  </select>
+                </div>
+                <div class="crypto__group-hint" x-text="groupHint(g)"></div>
               </div>
-
-              <div class="crypto__controls">
-                <span x-text="t('vigKeyLetter')"></span>
-                <select class="crypto__select" @change="shifts[j] = Number($event.target.value)">
-                  <template x-for="(a, s) in orderedAlphabet" :key="s">
-                    <option :value="s" :selected="s === shifts[j]" x-text="show(a) + ' (' + s + ')'"></option>
-                  </template>
-                </select>
-                <span x-text="t('vigMismatch') + ': ' + pct(g.mismatch[shifts[j]])"></span>
-              </div>
-
-              <div class="crypto__chips">
-                <span x-text="t('vigSuggested')"></span>
-                <button class="crypto__chip" :class="{ 'crypto__chip--active': shifts[j] === g.suggested }"
-                        @click="shifts[j] = g.suggested" x-text="show(orderedAlphabet[g.suggested])"></button>
-              </div>
-              <div class="crypto__chips">
-                <span x-text="t('vigBest')"></span>
-                <template x-for="b in g.best" :key="b.shift">
-                  <button class="crypto__chip" :class="{ 'crypto__chip--active': shifts[j] === b.shift }"
-                          @click="shifts[j] = b.shift"
-                          x-text="show(orderedAlphabet[b.shift]) + ' ' + pct(b.mismatch)"></button>
-                </template>
-              </div>
-
-              <table class="crypto__freq-table">
-                <thead>
-                  <tr>
-                    <th x-text="t('vigColCipher')"></th>
-                    <th x-text="t('vigColPlain')"></th>
-                    <th x-text="t('vigColGroup')"></th>
-                    <th x-text="t('vigColRef')"></th>
-                    <th x-text="t('vigColDiff')"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <template x-for="r in groupTable(g, j)" :key="r.cipher">
-                    <tr>
-                      <td x-text="show(r.cipher)"></td>
-                      <td x-text="show(r.plain)"></td>
-                      <td x-text="pct(r.freq)"></td>
-                      <td x-text="pct(r.ref)"></td>
-                      <td x-text="signed(r.diff)"></td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
-            </div>
-          </template>
+            </template>
+          </div>
         </div>
       </div>
     </template>
@@ -270,6 +233,30 @@
                   :disabled="!mapping[modalSymbol]"
                   @click="undoFromModal()" x-text="t('undoReplacement')"></button>
           <button class="crypto__button" @click="closeModal()" x-text="t('close')"></button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- Окно: алфавит Вижинера -->
+  <template x-if="alphaOpen">
+    <div class="crypto__modal-backdrop" @click.self="closeAlpha()">
+      <div class="crypto__modal crypto__modal--wide">
+        <h3 class="crypto__modal-title" x-text="t('alphaTitle')"></h3>
+        <p class="crypto__modal-hint" x-text="t('alphaHint')"></p>
+        <input class="crypto__key-input crypto__alpha-input" x-model="alphaDraft" @keydown.enter="applyAlpha()" spellcheck="false">
+        <div class="crypto__alpha-cells">
+          <template x-for="(a, i) in alphaDraftInfo.list" :key="i">
+            <div class="crypto__alpha-cell"><b x-text="show(a)"></b><small x-text="i"></small></div>
+          </template>
+        </div>
+        <p class="crypto__modal-hint" x-text="t('alphaSize', { n: alphaDraftInfo.list.length })"></p>
+        <p class="crypto__modal-hint" style="color:#c62828" x-show="alphaDraftInfo.error"
+           x-text="alphaDraftInfo.error === 'dup' ? t('alphaDup') : t('alphaNoSpace')"></p>
+        <div class="crypto__controls">
+          <button class="crypto__button crypto__button--primary" :disabled="alphaDraftInfo.error" @click="applyAlpha()" x-text="t('alphaApply')"></button>
+          <button class="crypto__button" @click="resetAlpha()" x-text="t('alphaReset')"></button>
+          <button class="crypto__button" @click="closeAlpha()" x-text="t('close')"></button>
         </div>
       </div>
     </div>

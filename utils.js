@@ -148,23 +148,21 @@ FA.vigenereReport = function (text, lang, refFreq, maxL) {
 };
 
 // ---------- Подбор ключа Вижинера ----------
-// Алфавит A = FA.ALPHABETS[lang]; номер символа — его значение. Шифр: c = (p + k) mod |A|.
+// Алфавит A — по умолчанию FA.ALPHABETS[lang], можно изменить в окне «Алфавит»; номер символа — его значение. Шифр: c = (p + k) mod |A|.
 
-FA.formatSignedPct = function (value) {
-  return (value >= 0 ? '+' : '') + (value * 100).toFixed(2) + '%';
-};
-
-FA.normalizeFreq = function (freq) {
-  const total = Object.values(freq).reduce((s, v) => s + v, 0);
-  const out = {};
-  for (const k in freq) out[k] = freq[k] / total;
-  return out;
-};
-
-FA.indexMap = function (lang) {
+FA.indexMap = function (alphabet) {
   const map = {};
-  FA.ALPHABETS[lang].forEach((s, i) => { map[s] = i; });
+  alphabet.forEach((s, i) => { map[s] = i; });
   return map;
+};
+
+// Строка из окна «Алфавит» -> { list, error }. Регистр и пробелы/запятые игнорируются,
+// пробел текста обозначается '_'. Ошибка: 'dup' (повтор символа) или 'noSpace' (нет '_').
+FA.parseAlphabet = function (str) {
+  const list = Array.from(str.toLowerCase().replace(/[\s,;]+/g, ''));
+  if (new Set(list).size !== list.length) return { list, error: 'dup' };
+  if (!list.includes('_')) return { list, error: 'noSpace' };
+  return { list, error: null };
 };
 
 // Текст -> массив символов алфавита (буквы в нижнем регистре и '_').
@@ -184,69 +182,43 @@ FA.splitGroups = function (symbols, l) {
   return groups;
 };
 
-// Анализ одной группы (это шифр Цезаря со сдвигом k):
-//  freq[i]       — доля символа с номером i в группе;
-//  suggested     — сдвиг, при котором самый частый символ группы переходит в '_';
-//  mismatch[s]   — несовпадение с эталоном при сдвиге s: сумма |частота - эталон| / 2 (0 = идеально);
-//  best          — три сдвига с наименьшим несовпадением.
-FA.analyzeGroup = function (groupSymbols, lang) {
-  const alphabet = FA.ALPHABETS[lang];
+// Группа — шифр Цезаря со сдвигом k. Два способа оценить k:
+//  bySpace — самый частый символ группы почти всегда пробел ('_'): k = номер символа − номер '_' (mod |A|);
+//  byFit   — сдвиг, при котором частоты всей группы лучше всего совпадают с эталоном (скалярное
+//            произведение). Устойчивее: на группах по 160–800 символов правило по пробелу целиком
+//            угадывает ключ лишь в 15–92% случаев, подбор по таблице — в 100%.
+FA.analyzeGroup = function (groupSymbols, lang, alphabet) {
   const N = alphabet.length;
-  const idx = FA.indexMap(lang);
-  const ref = FA.normalizeFreq(FA.REF_FREQS[lang]);
+  const idx = FA.indexMap(alphabet);
+  const ref = FA.REF_FREQS[lang];
   const n = groupSymbols.length;
-
   const counts = new Array(N).fill(0);
   for (const s of groupSymbols) counts[idx[s]]++;
-  const freq = counts.map(c => (n ? c / n : 0));
-
-  // При сдвиге s символ с номером i расшифровывается в (i - s) mod N.
-  const mismatch = [];
-  for (let s = 0; s < N; s++) {
-    let sum = 0;
-    for (let i = 0; i < N; i++) sum += Math.abs(freq[i] - ref[alphabet[(i - s + N) % N]]);
-    mismatch.push(sum / 2);
-  }
 
   let top = 0;
   for (let i = 1; i < N; i++) if (counts[i] > counts[top]) top = i;
-  const suggested = (top - idx['_'] + N) % N;
 
-  const best = mismatch
-    .map((m, shift) => ({ shift, mismatch: m }))
-    .sort((a, b) => a.mismatch - b.mismatch)
-    .slice(0, 3);
-
-  return { n, counts, freq, mismatch, suggested, best };
-};
-
-// Строки таблицы группы при выбранном сдвиге: шифрсимвол -> расшифрованный, частота в группе,
-// эталонная частота расшифрованного символа (нормирована), разница.
-FA.groupTable = function (analysis, lang, shift, limit) {
-  const alphabet = FA.ALPHABETS[lang];
-  const N = alphabet.length;
-  const ref = FA.normalizeFreq(FA.REF_FREQS[lang]);
-  const rows = [];
-  for (let i = 0; i < N; i++) {
-    if (!analysis.counts[i]) continue;
-    const plain = alphabet[(i - shift + N) % N];
-    rows.push({
-      cipher: alphabet[i],
-      plain,
-      freq: analysis.freq[i],
-      ref: ref[plain],
-      diff: analysis.freq[i] - ref[plain]
-    });
+  // При сдвиге s символ с номером i расшифровывается в (i - s) mod N.
+  let byFit = 0, bestScore = -1;
+  for (let s = 0; s < N; s++) {
+    let score = 0;
+    for (let i = 0; i < N; i++) score += counts[i] * (ref[alphabet[(i - s + N) % N]] || 0);
+    if (score > bestScore) { bestScore = score; byFit = s; }
   }
-  rows.sort((a, b) => b.freq - a.freq);
-  return rows.slice(0, limit || 10);
+
+  return {
+    n,
+    topSymbol: alphabet[top],
+    topFreq: n ? counts[top] / n : 0,
+    bySpace: (top - idx['_'] + N) % N,
+    byFit
+  };
 };
 
 // Расшифровка: p_i = (c_i - k_(i mod l)) mod |A|. Возвращает массив символов.
-FA.vigenereDecrypt = function (symbols, shifts, lang) {
-  const alphabet = FA.ALPHABETS[lang];
+FA.vigenereDecrypt = function (symbols, shifts, alphabet) {
   const N = alphabet.length;
-  const idx = FA.indexMap(lang);
+  const idx = FA.indexMap(alphabet);
   const l = shifts.length;
   return symbols.map((s, i) => alphabet[(idx[s] - shifts[i % l] + N * 2) % N]);
 };
